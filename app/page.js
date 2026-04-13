@@ -9,17 +9,26 @@ var STYLES = [
   { id: "avantgarde", name: "Avant-Garde", color: "#ec4899" },
 ];
 
+async function safeFetch(url, opts) {
+  var resp = await fetch(url, opts);
+  var text = await resp.text();
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error(text.substring(0, 200));
+  }
+}
+
 export default function Home() {
-  var _s = useState, _r = useRef, _c = useCallback;
-  var [step, setStep] = _s("upload");
-  var [photo, setPhoto] = _s(null);
-  var [garment, setGarment] = _s(null);
-  var [sel, setSel] = _s([]);
-  var [prog, setProg] = _s(0);
-  var [status, setStatus] = _s("");
-  var [errMsg, setErrMsg] = _s("");
-  var [result, setResult] = _s(null);
-  var fRef = _r(null), gRef = _r(null);
+  var [step, setStep] = useState("upload");
+  var [photo, setPhoto] = useState(null);
+  var [garment, setGarment] = useState(null);
+  var [sel, setSel] = useState([]);
+  var [prog, setProg] = useState(0);
+  var [status, setStatus] = useState("");
+  var [errMsg, setErrMsg] = useState("");
+  var [result, setResult] = useState(null);
+  var fRef = useRef(null), gRef = useRef(null);
 
   var loadImg = function(file, setter) {
     if (!file || !file.type || !file.type.startsWith("image/")) return;
@@ -28,46 +37,54 @@ export default function Home() {
     r.readAsDataURL(file);
   };
 
-  var go = _c(function() {
+  var go = useCallback(function() {
     setStep("processing"); setProg(0); setErrMsg("");
     var p = 0;
     var iv = setInterval(function() { p += 0.4; setProg(Math.min(p, 95)); }, 100);
 
     (async function() {
       try {
+        // 1: Analyze
         setStatus("Fotoğraf analiz ediliyor...");
-        var aResp = await fetch("/api/analyze", {
+        var aData = await safeFetch("/api/analyze", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ photo: photo, styles: sel }),
         });
-        var aData = await aResp.json();
         if (aData.error) throw new Error(aData.error);
         var analysis = aData.analysis;
-        setProg(25);
+        setProg(30);
 
+        // 2: Find garment
         var gUrl = garment;
         if (!gUrl && analysis && analysis.outfitPieces && analysis.outfitPieces[0]) {
           setStatus("Kıyafet görseli aranıyor...");
-          var gResp = await fetch("/api/analyze", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ findGarment: true, garmentQuery: analysis.outfitPieces[0] }),
-          });
-          var gData = await gResp.json();
-          if (gData.garmentUrl) gUrl = gData.garmentUrl;
+          try {
+            var gData = await safeFetch("/api/analyze", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ findGarment: true, garmentQuery: analysis.outfitPieces[0] }),
+            });
+            if (gData.garmentUrl) gUrl = gData.garmentUrl;
+          } catch (e) {
+            console.log("Garment search failed, continuing without:", e.message);
+          }
         }
         setProg(45);
 
+        // 3: Try-on
         var tryOnImg = null;
         var method = "none";
         if (gUrl) {
           setStatus("Virtual try-on oluşturuluyor (30-60 sn)...");
-          var tResp = await fetch("/api/tryon", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ humanImage: photo, garmentImage: gUrl, clothType: "overall" }),
-          });
-          var tData = await tResp.json();
-          if (tData.success && tData.image) { tryOnImg = tData.image; method = "ai-tryon"; }
-          else if (tData.error) setErrMsg("Try-on: " + tData.error);
+          try {
+            var tData = await safeFetch("/api/tryon", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ humanImage: photo, garmentImage: gUrl, clothType: "overall" }),
+            });
+            if (tData.success && tData.image) { tryOnImg = tData.image; method = "ai-tryon"; }
+            else if (tData.error) setErrMsg("Try-on: " + tData.error);
+          } catch (e) {
+            setErrMsg("Try-on hatası: " + e.message.substring(0, 100));
+          }
         } else {
           setErrMsg("Kıyafet görseli bulunamadı — kıyafet yükleyerek tekrar deneyin");
         }
@@ -75,6 +92,7 @@ export default function Home() {
         clearInterval(iv); setProg(100);
         setResult({ analysis: analysis, styledPhoto: tryOnImg, method: method });
         setTimeout(function() { setStep("result"); }, 500);
+
       } catch (err) {
         clearInterval(iv);
         setErrMsg(err.message);
@@ -85,9 +103,8 @@ export default function Home() {
 
   var P = { minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 20px", background: "#131313", color: "#e5e2e1", fontFamily: "Inter,sans-serif" };
   var H = { fontFamily: "Manrope", fontWeight: 800, fontSize: 36, letterSpacing: -2, marginBottom: 8, textAlign: "center" };
-  var B = function(active) { return { padding: "14px 32px", borderRadius: 14, fontWeight: 700, fontSize: 15, border: "none", cursor: active ? "pointer" : "not-allowed", background: active ? "linear-gradient(135deg,#cdbdff,#5d21df)" : "#333", color: active ? "#370096" : "#666", fontFamily: "Manrope" }; };
+  var B = function(active) { return { marginTop: 24, padding: "14px 32px", borderRadius: 14, fontWeight: 700, fontSize: 15, border: "none", cursor: active ? "pointer" : "not-allowed", background: active ? "linear-gradient(135deg,#cdbdff,#5d21df)" : "#333", color: active ? "#370096" : "#666", fontFamily: "Manrope" }; };
 
-  // UPLOAD
   if (step === "upload") return (
     <div style={P}>
       <h1 style={H}>Fotoğrafını Yükle</h1>
@@ -104,7 +121,6 @@ export default function Home() {
     </div>
   );
 
-  // STYLE
   if (step === "style") return (
     <div style={P}>
       <h1 style={H}>Stilini Seç</h1>
@@ -122,7 +138,6 @@ export default function Home() {
     </div>
   );
 
-  // PROCESSING
   if (step === "processing") return (
     <div style={P}>
       <div style={{ fontSize: 64, marginBottom: 24 }}>🧠</div>
@@ -135,7 +150,6 @@ export default function Home() {
     </div>
   );
 
-  // RESULT
   if (step === "result" && result) {
     var a = result.analysis;
     var sp = result.styledPhoto;
@@ -152,7 +166,7 @@ export default function Home() {
             <div style={{ position: "absolute", top: 12, left: 12, background: "rgba(0,0,0,0.7)", padding: "4px 12px", borderRadius: 6, fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: "#888" }}>Önce</div>
           </div>
           <div style={{ position: "relative", borderRadius: 16, overflow: "hidden", aspectRatio: "3/4", background: "#1c1b1b" }}>
-            {sp ? <img src={sp} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", padding: 24 }}><p style={{ color: "#888" }}>Try-on başarısız</p>{errMsg && <p style={{ color: "#ffb4ab", fontSize: 12, marginTop: 8, textAlign: "center" }}>{errMsg}</p>}</div>}
+            {sp ? <img src={sp} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", padding: 24, textAlign: "center" }}><p style={{ color: "#888" }}>Try-on başarısız</p>{errMsg && <p style={{ color: "#ffb4ab", fontSize: 12, marginTop: 8 }}>{errMsg}</p>}</div>}
             <div style={{ position: "absolute", top: 12, left: 12, display: "flex", gap: 6 }}>
               <span style={{ background: "rgba(205,189,255,0.3)", padding: "4px 12px", borderRadius: 6, fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: "#cdbdff" }}>Sonra</span>
               <span style={{ padding: "4px 8px", borderRadius: 6, fontSize: 9, fontWeight: 700, textTransform: "uppercase", background: mt === "ai-tryon" ? "rgba(74,222,128,0.2)" : "rgba(255,180,171,0.2)", color: mt === "ai-tryon" ? "#4ade80" : "#ffb4ab" }}>{mt === "ai-tryon" ? "AI TRY-ON ✓" : "BAŞARISIZ"}</span>
