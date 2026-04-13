@@ -1,28 +1,29 @@
-# FitAI v3 — OpenAI + Gemini Fallback
+# FitAI v4 — Tamamen Ücretsiz Virtual Try-On
 
-## Akıllı Fallback Sistemi
+## Artık fal.ai'ye Gerek Yok!
 
-```
-Fotoğraf Analizi:  OpenAI GPT-4o  →  Google Gemini (ücretsiz)
-Kıyafet Arama:    Gemini Search  →  OpenAI Search
-Virtual Try-On:   fal.ai cat-vton
-```
+Virtual try-on HuggingFace Spaces üzerinden çalışıyor — ücretsiz, API key gerektirmiyor.
 
-Kullanıcı hiçbir şey farketmez — OpenAI kredisi bitince otomatik Gemini'ye geçer.
-
-## 3 API Key Gerekiyor
+## Sadece 2 API Key Gerekiyor
 
 | Key | Nereden | Ücret |
 |-----|---------|-------|
-| OPENAI_API_KEY | platform.openai.com/api-keys | $5 min (100+ try-on) |
-| GEMINI_API_KEY | aistudio.google.com/apikey | Ücretsiz (1500/gün) |
-| FAL_KEY | fal.ai/dashboard/keys | Ücretsiz tier var |
+| OPENAI_API_KEY | platform.openai.com/api-keys | $5 min |
+| GEMINI_API_KEY | aistudio.google.com/apikey | Ücretsiz |
 
-## Deploy (GitHub + Vercel)
+OpenAI kredisi bitince otomatik Gemini'ye geçer.
+
+## Sistem
+
+```
+Fotoğraf Analizi: OpenAI GPT-4o → Gemini fallback (ücretsiz)
+Kıyafet Arama:   Gemini Google Search (ücretsiz)
+Virtual Try-On:   HuggingFace Spaces (ücretsiz, API key yok)
+```
+
+## Deploy
 
 1. GitHub'a dosyaları yükle
-2. Vercel'e bağla → Environment Variables ekle:
-   - `OPENAI_API_KEY`
-   - `GEMINI_API_KEY`
-   - `FAL_KEY`
-3. Deploy → bitti!
+2. Vercel'e bağla
+3. Environment Variables: OPENAI_API_KEY + GEMINI_API_KEY
+4. Deploy → bitti!
