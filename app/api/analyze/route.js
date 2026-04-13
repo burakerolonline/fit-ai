@@ -1,18 +1,18 @@
-// app/api/analyze/route.js
-// Anthropic API ile fotoğraf analizi + kıyafet görseli arama
+// Vercel timeout: 60 saniye
+export const maxDuration = 60;
 
 export async function POST(request) {
   try {
-    const { photo, styles, findGarment, garmentQuery } = await request.json();
+    const body = await request.json();
     const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
     if (!ANTHROPIC_KEY) {
       return Response.json({ error: "ANTHROPIC_API_KEY not set" }, { status: 500 });
     }
 
-    // If findGarment mode — search for garment image
-    if (findGarment) {
-      const searchResp = await fetch("https://api.anthropic.com/v1/messages", {
+    // Kıyafet görseli arama modu
+    if (body.findGarment) {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
           "x-api-key": ANTHROPIC_KEY,
@@ -25,49 +25,38 @@ export async function POST(request) {
           tools: [{ type: "web_search_20250305", name: "web_search" }],
           messages: [{
             role: "user",
-            content: `Search for a product photo of "${garmentQuery}" clothing item on a plain white background. Find a direct image URL (.jpg, .png, .webp) from a shopping or fashion catalog. Return ONLY the direct image URL.`
+            content: "Search for a product photo of \"" + body.garmentQuery + "\" clothing item on a plain white background. Find a direct image URL (.jpg, .png, .webp) from a shopping or fashion catalog website. Return ONLY the direct image URL, nothing else."
           }],
         }),
       });
 
-      const searchData = await searchResp.json();
-      const text = (searchData.content || []).map(c => c.text || "").filter(Boolean).join(" ");
+      if (!resp.ok) {
+        const err = await resp.text();
+        return Response.json({ error: "Anthropic API error: " + err }, { status: resp.status });
+      }
+
+      const data = await resp.json();
+      const text = (data.content || []).map(function(c) { return c.text || ""; }).filter(Boolean).join(" ");
       const urls = text.match(/https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'<>]*)?/gi);
 
-      return Response.json({ garmentUrl: urls?.[0] || null });
+      return Response.json({ garmentUrl: urls && urls[0] ? urls[0] : null });
     }
 
-    // Photo analysis mode
+    // Fotoğraf analiz modu
     const userContent = [];
-    if (photo) {
-      const base64 = photo.split(",")[1];
-      const mediaType = photo.split(";")[0].split(":")[1] || "image/jpeg";
+    if (body.photo) {
+      const base64 = body.photo.split(",")[1];
+      const mediaType = body.photo.split(";")[0].split(":")[1] || "image/jpeg";
       userContent.push({
         type: "image",
         source: { type: "base64", media_type: mediaType, data: base64 },
       });
     }
 
-    const styleNames = styles?.join(", ") || "luxury";
+    const styleNames = body.styles && body.styles.length > 0 ? body.styles.join(", ") : "luxury";
     userContent.push({
       type: "text",
-      text: `Bu kişinin fotoğrafını analiz et. Seçtiği stiller: ${styleNames}.
-
-SADECE JSON döndür:
-{
-  "bodyType": "vücut tipi (1 cümle)",
-  "skinTone": "ten rengi (1 cümle)",
-  "faceShape": "yüz şekli (1 cümle)",
-  "currentStyle": "mevcut giyim tarzı (1 cümle)",
-  "recommendedOutfit": "önerilen kombin detaylı (3-4 cümle)",
-  "colorRecommendation": "renk önerileri (2 cümle)",
-  "fitTips": "kesim önerileri (2 cümle)",
-  "avoidList": "kaçınılacaklar (1-2 cümle)",
-  "score": 8.5-9.8,
-  "tier": "Elite Tier veya Premium Tier",
-  "outfitPieces": ["parça1", "parça2", "parça3", "parça4", "parça5"]
-}
-Türkçe yaz.`,
+      text: "Bu kisinin fotografini analiz et. Sectigi stiller: " + styleNames + ". SADECE JSON dondur, baska bir sey yazma: {\"bodyType\":\"vucut tipi 1 cumle\",\"skinTone\":\"ten rengi 1 cumle\",\"faceShape\":\"yuz sekli 1 cumle\",\"currentStyle\":\"mevcut giyim tarzi 1 cumle\",\"recommendedOutfit\":\"onerilen kombin detayli 3-4 cumle\",\"colorRecommendation\":\"renk onerileri 2 cumle\",\"fitTips\":\"kesim onerileri 2 cumle\",\"avoidList\":\"kacinilacaklar 1-2 cumle\",\"score\":9.0,\"tier\":\"Elite Tier\",\"outfitPieces\":[\"parca1\",\"parca2\",\"parca3\",\"parca4\",\"parca5\"]}. Turkce yaz, kisiye ozel ol."
     });
 
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
@@ -84,13 +73,19 @@ Türkçe yaz.`,
       }),
     });
 
+    if (!resp.ok) {
+      const err = await resp.text();
+      return Response.json({ error: "Anthropic API error: " + err }, { status: resp.status });
+    }
+
     const data = await resp.json();
-    const text = (data.content || []).map(c => c.text || "").join("");
+    const text = (data.content || []).map(function(c) { return c.text || ""; }).join("");
     const analysis = JSON.parse(text.replace(/```json|```/g, "").trim());
 
-    return Response.json({ analysis });
+    return Response.json({ analysis: analysis });
 
   } catch (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+    console.error("Analyze error:", error);
+    return Response.json({ error: error.message || "Unknown error" }, { status: 500 });
   }
 }

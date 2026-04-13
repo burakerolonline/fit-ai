@@ -1,69 +1,37 @@
-# FitAI - Virtual Try-On
+# FitAI v2 - Virtual Try-On
 
-AI destekli sanal kıyafet deneme uygulaması.
+## Önceki Versiyondaki Hatalar ve Düzeltmeler
 
-## Nasıl Çalışır
+| Hata | Düzeltme |
+|------|----------|
+| Vercel 10sn timeout → fal.ai yanıt veremiyordu | `maxDuration = 60` eklendi |
+| Base64 resim çok büyük → fal.ai reddediyordu | `fal.storage.upload()` ile önce yükleniyor |
+| Raw fetch ile fal.ai polling hatası | `@fal-ai/client` SDK kullanılıyor (otomatik queue + poll) |
+| Hata mesajları gösterilmiyordu | Detaylı error handling eklendi |
 
-1. Fotoğrafını yükle
-2. Stil seç (luxury, streetwear, casual, minimalist, avant-garde)
-3. AI fotoğrafını analiz eder (vücut tipi, ten rengi, yüz şekli)
-4. Önerilen kıyafeti web'den bulur
-5. **fal.ai** ile kıyafeti senin üzerine giydirir
-6. Before/After sonucu gösterir
-
-## Kurulum (5 dakika)
+## Kurulum
 
 ### 1. API Key'leri Al
+- **fal.ai**: https://fal.ai/dashboard/keys
+- **Anthropic**: https://console.anthropic.com
 
-- **fal.ai**: https://fal.ai/dashboard/keys → ücretsiz key al
-- **Anthropic**: https://console.anthropic.com → API key al
+### 2. GitHub'a Yükle
+- Tüm dosyaları GitHub repo'na yükle ("Upload files")
+- `.env.example` dosyasını `.env.local` olarak KOPYALAMA — Vercel'de env var olarak ekleyeceksin
 
-### 2. Projeyi Kur
+### 3. Vercel'de Deploy Et
+- vercel.com → "Add New Project" → GitHub repo seç
+- **Environment Variables** ekle:
+  - `FAL_KEY` = fal.ai key'in
+  - `ANTHROPIC_API_KEY` = Anthropic key'in
+- Deploy
 
-```bash
-git clone <repo>
-cd fitai
-cp .env.example .env.local
+## Dosya Yapısı
 ```
-
-`.env.local` dosyasını düzenle:
+app/
+├── page.js              ← Frontend
+├── layout.js            ← HTML layout
+├── api/
+│   ├── analyze/route.js ← Anthropic Vision + web search
+│   └── tryon/route.js   ← fal.ai cat-vton (server-side)
 ```
-FAL_KEY=your_fal_key_here
-ANTHROPIC_API_KEY=your_anthropic_key_here
-```
-
-### 3. Çalıştır
-
-```bash
-npm install
-npm run dev
-```
-
-http://localhost:3000 adresini aç.
-
-### 4. Vercel'e Deploy Et (opsiyonel)
-
-```bash
-npx vercel
-```
-
-Vercel dashboard'da Environment Variables'a API key'lerini ekle.
-
-## API Routes
-
-| Route | Açıklama |
-|-------|----------|
-| `POST /api/analyze` | Fotoğraf analizi (Anthropic Vision) + kıyafet görseli arama |
-| `POST /api/tryon` | Virtual try-on (fal.ai cat-vton) |
-
-## Neden Backend Gerekli?
-
-fal.ai ve diğer AI API'leri tarayıcıdan doğrudan çağrılamıyor (CORS engeli).
-Next.js API routes bu sorunu çözüyor — API çağrıları server-side yapılıyor.
-
-## Teknoloji
-
-- **Frontend**: Next.js 14 + React
-- **AI Analiz**: Anthropic Claude (vision + web search)
-- **Virtual Try-On**: fal.ai cat-vton
-- **Deploy**: Vercel

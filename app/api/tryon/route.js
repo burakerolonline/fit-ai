@@ -1,70 +1,69 @@
-// app/api/tryon/route.js
-// Bu API route fal.ai'yi server-side çağırır — CORS sorunu yok!
+import { fal } from "@fal-ai/client";
+
+// Vercel timeout: 60 saniye (hobby plan max)
+export const maxDuration = 60;
 
 export async function POST(request) {
   try {
     const { humanImage, garmentImage, clothType } = await request.json();
-    const FAL_KEY = process.env.FAL_KEY;
-    
-    if (!FAL_KEY) {
+
+    if (!process.env.FAL_KEY) {
       return Response.json({ error: "FAL_KEY environment variable not set" }, { status: 500 });
     }
 
-    // Step 1: Submit to fal.ai queue
-    const submitResp = await fetch("https://queue.fal.run/fal-ai/cat-vton", {
-      method: "POST",
-      headers: {
-        "Authorization": "Key " + FAL_KEY,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        human_image_url: humanImage,
-        garment_image_url: garmentImage,
+    // fal.ai client'ı yapılandır
+    fal.config({ credentials: process.env.FAL_KEY });
+
+    // Base64 resimleri fal.ai storage'a yükle
+    let humanUrl = humanImage;
+    let garmentUrl = garmentImage;
+
+    if (humanImage && humanImage.startsWith("data:")) {
+      const humanBlob = dataURLtoBlob(humanImage);
+      humanUrl = await fal.storage.upload(humanBlob);
+    }
+
+    if (garmentImage && garmentImage.startsWith("data:")) {
+      const garmentBlob = dataURLtoBlob(garmentImage);
+      garmentUrl = await fal.storage.upload(garmentBlob);
+    }
+
+    // fal.ai cat-vton modelini çağır (subscribe = queue + polling otomatik)
+    const result = await fal.subscribe("fal-ai/cat-vton", {
+      input: {
+        human_image_url: humanUrl,
+        garment_image_url: garmentUrl,
         cloth_type: clothType || "overall",
-      }),
+      },
     });
 
-    if (!submitResp.ok) {
-      const err = await submitResp.text();
-      return Response.json({ error: "fal.ai submit failed: " + err }, { status: submitResp.status });
-    }
-
-    const { request_id, status_url, response_url } = await submitResp.json();
-
-    // Step 2: Poll for completion (max 3 minutes)
-    for (let i = 0; i < 60; i++) {
-      await new Promise(r => setTimeout(r, 3000));
-      
-      const statusResp = await fetch(status_url, {
-        headers: { "Authorization": "Key " + FAL_KEY },
+    if (result.data?.image?.url) {
+      return Response.json({
+        success: true,
+        image: result.data.image.url,
+        method: "fal-ai-cat-vton",
       });
-      const statusData = await statusResp.json();
-
-      if (statusData.status === "COMPLETED") {
-        // Get result
-        const resultResp = await fetch(response_url, {
-          headers: { "Authorization": "Key " + FAL_KEY },
-        });
-        const resultData = await resultResp.json();
-        
-        return Response.json({
-          success: true,
-          image: resultData.image?.url || null,
-          method: "fal-ai-cat-vton",
-        });
-      }
-
-      if (statusData.status === "FAILED") {
-        return Response.json({ 
-          error: "Try-on generation failed", 
-          details: statusData 
-        }, { status: 500 });
-      }
     }
 
-    return Response.json({ error: "Timeout waiting for result" }, { status: 504 });
+    return Response.json({ error: "No image in result", data: result.data }, { status: 500 });
 
   } catch (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+    console.error("Try-on error:", error);
+    return Response.json({
+      error: error.message || "Unknown error",
+      details: error.body || error.toString(),
+    }, { status: 500 });
   }
+}
+
+// Base64 data URL -> Blob
+function dataURLtoBlob(dataURL) {
+  const parts = dataURL.split(",");
+  const mime = parts[0].match(/:(.*?);/)?.[1] || "image/jpeg";
+  const binary = atob(parts[1]);
+  const array = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    array[i] = binary.charCodeAt(i);
+  }
+  return new Blob([array], { type: mime });
 }
