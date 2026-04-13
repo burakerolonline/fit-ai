@@ -1,4 +1,4 @@
-export const metadata = { title: "FitAI - Virtual Try-On", description: "AI-powered virtual clothing try-on" };
+export const metadata = { title: "FitAI - Virtual Try-On" };
 export default function RootLayout({ children }) {
   return (
     <html lang="tr">

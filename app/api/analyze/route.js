@@ -1,91 +1,162 @@
-// Vercel timeout: 60 saniye
 export const maxDuration = 60;
 
-export async function POST(request) {
-  try {
-    const body = await request.json();
-    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+const PROMPT = function(styles) {
+  return "Bu kisinin fotografini analiz et. Stiller: " + styles + ". SADECE JSON dondur: {\"bodyType\":\"vucut tipi 1 cumle\",\"skinTone\":\"ten rengi 1 cumle\",\"faceShape\":\"yuz sekli 1 cumle\",\"currentStyle\":\"mevcut giyim 1 cumle\",\"recommendedOutfit\":\"onerilen kombin 3-4 cumle\",\"colorRecommendation\":\"renk onerileri 2 cumle\",\"fitTips\":\"kesim onerileri 2 cumle\",\"avoidList\":\"kacinilacaklar 1-2 cumle\",\"score\":9.0,\"tier\":\"Elite Tier\",\"outfitPieces\":[\"parca1\",\"parca2\",\"parca3\",\"parca4\",\"parca5\"]}. Turkce yaz, kisiye ozel ol.";
+};
 
-    if (!ANTHROPIC_KEY) {
-      return Response.json({ error: "ANTHROPIC_API_KEY not set" }, { status: 500 });
-    }
+const SEARCH_PROMPT = function(query) {
+  return "Search for a product photo of \"" + query + "\" clothing item on a plain white background from a shopping website. Find the direct image URL ending in .jpg .png or .webp. Return ONLY the URL, nothing else.";
+};
 
-    // Kıyafet görseli arama modu
-    if (body.findGarment) {
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "x-api-key": ANTHROPIC_KEY,
-          "anthropic-version": "2023-06-01",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 600,
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
-          messages: [{
-            role: "user",
-            content: "Search for a product photo of \"" + body.garmentQuery + "\" clothing item on a plain white background. Find a direct image URL (.jpg, .png, .webp) from a shopping or fashion catalog website. Return ONLY the direct image URL, nothing else."
-          }],
-        }),
-      });
+// ─── OpenAI GPT-4o ───
+async function analyzeWithOpenAI(photo, styles) {
+  var key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("NO_OPENAI_KEY");
 
-      if (!resp.ok) {
-        const err = await resp.text();
-        return Response.json({ error: "Anthropic API error: " + err }, { status: resp.status });
-      }
+  var content = [];
+  if (photo) {
+    content.push({ type: "image_url", image_url: { url: photo, detail: "low" } });
+  }
+  content.push({ type: "text", text: PROMPT(styles) });
 
-      const data = await resp.json();
-      const text = (data.content || []).map(function(c) { return c.text || ""; }).filter(Boolean).join(" ");
-      const urls = text.match(/https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'<>]*)?/gi);
+  var resp = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "Authorization": "Bearer " + key, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: content }],
+      max_tokens: 1500,
+    }),
+  });
 
-      return Response.json({ garmentUrl: urls && urls[0] ? urls[0] : null });
-    }
+  if (!resp.ok) {
+    var err = await resp.text();
+    throw new Error("OPENAI_FAIL:" + err);
+  }
 
-    // Fotoğraf analiz modu
-    const userContent = [];
-    if (body.photo) {
-      const base64 = body.photo.split(",")[1];
-      const mediaType = body.photo.split(";")[0].split(":")[1] || "image/jpeg";
-      userContent.push({
-        type: "image",
-        source: { type: "base64", media_type: mediaType, data: base64 },
-      });
-    }
+  var data = await resp.json();
+  var text = data.choices?.[0]?.message?.content || "";
+  return JSON.parse(text.replace(/```json|```/g, "").trim());
+}
 
-    const styleNames = body.styles && body.styles.length > 0 ? body.styles.join(", ") : "luxury";
-    userContent.push({
-      type: "text",
-      text: "Bu kisinin fotografini analiz et. Sectigi stiller: " + styleNames + ". SADECE JSON dondur, baska bir sey yazma: {\"bodyType\":\"vucut tipi 1 cumle\",\"skinTone\":\"ten rengi 1 cumle\",\"faceShape\":\"yuz sekli 1 cumle\",\"currentStyle\":\"mevcut giyim tarzi 1 cumle\",\"recommendedOutfit\":\"onerilen kombin detayli 3-4 cumle\",\"colorRecommendation\":\"renk onerileri 2 cumle\",\"fitTips\":\"kesim onerileri 2 cumle\",\"avoidList\":\"kacinilacaklar 1-2 cumle\",\"score\":9.0,\"tier\":\"Elite Tier\",\"outfitPieces\":[\"parca1\",\"parca2\",\"parca3\",\"parca4\",\"parca5\"]}. Turkce yaz, kisiye ozel ol."
-    });
+// ─── Google Gemini (fallback) ───
+async function analyzeWithGemini(photo, styles) {
+  var key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error("NO_GEMINI_KEY");
 
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+  var parts = [];
+  if (photo) {
+    var base64 = photo.split(",")[1];
+    var mime = photo.split(";")[0].split(":")[1] || "image/jpeg";
+    parts.push({ inline_data: { mime_type: mime, data: base64 } });
+  }
+  parts.push({ text: PROMPT(styles) });
+
+  var resp = await fetch(
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + key,
+    {
       method: "POST",
-      headers: {
-        "x-api-key": ANTHROPIC_KEY,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1500,
-        messages: [{ role: "user", content: userContent }],
+        contents: [{ parts: parts }],
+        generationConfig: { maxOutputTokens: 1500 },
+      }),
+    }
+  );
+
+  if (!resp.ok) {
+    var err = await resp.text();
+    throw new Error("GEMINI_FAIL:" + err);
+  }
+
+  var data = await resp.json();
+  var text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  return JSON.parse(text.replace(/```json|```/g, "").trim());
+}
+
+// ─── Garment Search (Gemini with Google Search grounding — free) ───
+async function searchGarmentWithGemini(query) {
+  var key = process.env.GEMINI_API_KEY;
+  if (!key) return null;
+
+  var resp = await fetch(
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + key,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: SEARCH_PROMPT(query) }] }],
+        tools: [{ google_search: {} }],
+        generationConfig: { maxOutputTokens: 300 },
+      }),
+    }
+  );
+
+  if (!resp.ok) return null;
+  var data = await resp.json();
+  var text = data.candidates?.[0]?.content?.parts?.map(function(p) { return p.text || ""; }).join(" ") || "";
+  var urls = text.match(/https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'<>]*)?/gi);
+  return urls?.[0] || null;
+}
+
+// ─── Garment Search fallback: OpenAI ───
+async function searchGarmentWithOpenAI(query) {
+  var key = process.env.OPENAI_API_KEY;
+  if (!key) return null;
+
+  try {
+    var resp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + key, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-4o-search-preview",
+        messages: [{ role: "user", content: SEARCH_PROMPT(query) }],
+        max_tokens: 300,
       }),
     });
+    if (!resp.ok) return null;
+    var data = await resp.json();
+    var text = data.choices?.[0]?.message?.content || "";
+    var urls = text.match(/https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'<>]*)?/gi);
+    return urls?.[0] || null;
+  } catch (e) { return null; }
+}
 
-    if (!resp.ok) {
-      const err = await resp.text();
-      return Response.json({ error: "Anthropic API error: " + err }, { status: resp.status });
+// ─── MAIN HANDLER ───
+export async function POST(request) {
+  try {
+    var body = await request.json();
+
+    // Garment search mode
+    if (body.findGarment) {
+      var url = await searchGarmentWithGemini(body.garmentQuery);
+      if (!url) url = await searchGarmentWithOpenAI(body.garmentQuery);
+      return Response.json({ garmentUrl: url });
     }
 
-    const data = await resp.json();
-    const text = (data.content || []).map(function(c) { return c.text || ""; }).join("");
-    const analysis = JSON.parse(text.replace(/```json|```/g, "").trim());
+    // Photo analysis: OpenAI first, Gemini fallback
+    var styles = body.styles?.join(", ") || "luxury";
+    var analysis = null;
+    var usedApi = "none";
 
-    return Response.json({ analysis: analysis });
+    try {
+      analysis = await analyzeWithOpenAI(body.photo, styles);
+      usedApi = "openai";
+    } catch (openaiErr) {
+      console.log("OpenAI failed:", openaiErr.message, "→ falling back to Gemini");
+      try {
+        analysis = await analyzeWithGemini(body.photo, styles);
+        usedApi = "gemini";
+      } catch (geminiErr) {
+        return Response.json({
+          error: "Both APIs failed. OpenAI: " + openaiErr.message + " | Gemini: " + geminiErr.message
+        }, { status: 500 });
+      }
+    }
+
+    return Response.json({ analysis: analysis, api: usedApi });
 
   } catch (error) {
-    console.error("Analyze error:", error);
-    return Response.json({ error: error.message || "Unknown error" }, { status: 500 });
+    return Response.json({ error: error.message }, { status: 500 });
   }
 }
